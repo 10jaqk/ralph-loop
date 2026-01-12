@@ -25,15 +25,63 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Create ENUMs
-    op.execute("CREATE TYPE secrets_provider AS ENUM ('railway', 'aws_secrets_manager', 'gcp_secret_manager', 'vault', 'none')")
-    op.execute("CREATE TYPE db_context_mode AS ENUM ('none', 'metadata_only', 'readonly')")
-    op.execute("CREATE TYPE build_type AS ENUM ('PLAN', 'CODE')")
-    op.execute("CREATE TYPE builder_signal AS ENUM ('READY_FOR_REVIEW', 'NEEDS_WORK', 'DEPLOYED')")
-    op.execute("CREATE TYPE inspection_status AS ENUM ('PENDING', 'PASSED', 'FAILED')")
-    op.execute("CREATE TYPE review_queue_type AS ENUM ('PLAN', 'CODE')")
-    op.execute("CREATE TYPE review_queue_status AS ENUM ('PENDING', 'DISPATCHED', 'COMPLETED', 'FAILED')")
-    op.execute("CREATE TYPE revision_status AS ENUM ('PENDING', 'IN_PROGRESS', 'COMPLETED')")
+    # Create ENUMs (with idempotent handling - skip if already exists)
+    op.execute("""
+        DO $$ BEGIN
+            CREATE TYPE secrets_provider AS ENUM ('railway', 'aws_secrets_manager', 'gcp_secret_manager', 'vault', 'none');
+        EXCEPTION
+            WHEN duplicate_object THEN null;
+        END $$;
+    """)
+    op.execute("""
+        DO $$ BEGIN
+            CREATE TYPE db_context_mode AS ENUM ('none', 'metadata_only', 'readonly');
+        EXCEPTION
+            WHEN duplicate_object THEN null;
+        END $$;
+    """)
+    op.execute("""
+        DO $$ BEGIN
+            CREATE TYPE build_type AS ENUM ('PLAN', 'CODE');
+        EXCEPTION
+            WHEN duplicate_object THEN null;
+        END $$;
+    """)
+    op.execute("""
+        DO $$ BEGIN
+            CREATE TYPE builder_signal AS ENUM ('READY_FOR_REVIEW', 'NEEDS_WORK', 'DEPLOYED');
+        EXCEPTION
+            WHEN duplicate_object THEN null;
+        END $$;
+    """)
+    op.execute("""
+        DO $$ BEGIN
+            CREATE TYPE inspection_status AS ENUM ('PENDING', 'PASSED', 'FAILED');
+        EXCEPTION
+            WHEN duplicate_object THEN null;
+        END $$;
+    """)
+    op.execute("""
+        DO $$ BEGIN
+            CREATE TYPE review_queue_type AS ENUM ('PLAN', 'CODE');
+        EXCEPTION
+            WHEN duplicate_object THEN null;
+        END $$;
+    """)
+    op.execute("""
+        DO $$ BEGIN
+            CREATE TYPE review_queue_status AS ENUM ('PENDING', 'DISPATCHED', 'COMPLETED', 'FAILED');
+        EXCEPTION
+            WHEN duplicate_object THEN null;
+        END $$;
+    """)
+    op.execute("""
+        DO $$ BEGIN
+            CREATE TYPE revision_status AS ENUM ('PENDING', 'IN_PROGRESS', 'COMPLETED');
+        EXCEPTION
+            WHEN duplicate_object THEN null;
+        END $$;
+    """)
 
     # Table: project_registry
     op.create_table(
