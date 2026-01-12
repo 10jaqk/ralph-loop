@@ -31,6 +31,11 @@ class Settings(BaseSettings):
     # Authentication
     ADMIN_API_KEY: str = os.getenv("ADMIN_API_KEY", "")
 
+    # Telegram Notifications
+    TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    TELEGRAM_CHAT_ID: str = os.getenv("TELEGRAM_CHAT_ID", "")
+    RALPH_WEB_URL: str = os.getenv("RALPH_WEB_URL", "https://ralph-mcp-production.up.railway.app")
+
     # CORS
     ALLOWED_ORIGINS: List[str] = [
         "https://chat.openai.com",

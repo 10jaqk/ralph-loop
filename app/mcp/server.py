@@ -21,6 +21,7 @@ from typing import Dict, Any, Optional, List
 from pydantic import BaseModel, Field
 import json
 import asyncio
+from app.services.telegram_service import get_telegram_service
 import asyncpg
 
 router = APIRouter(prefix="/mcp", tags=["mcp"])
@@ -531,6 +532,23 @@ async def handle_submit_inspection(
     """, new_status, build_pk)
 
     return {
+    # Send Telegram notification
+    telegram = get_telegram_service()
+    if passed:
+        await telegram.send_status_update(
+            build_id=build_id,
+            project_id=build['project_id'],
+            status="passed",
+            message=f"✅ *Inspection PASSED*\n\nChatGPT approved the build!\n\nConfidence: {confidence:.1%}" if confidence else "✅ *Inspection PASSED*\n\nChatGPT approved the build!"
+        )
+    else:
+        await telegram.send_status_update(
+            build_id=build_id,
+            project_id=build['project_id'],
+            status="failed",
+            message=f"❌ *Inspection FAILED*\n\n{len(issues)} issue(s) found.\n\n🔧 Claude will address the feedback..."
+        )
+
         "status": "submitted",
         "inspection_id": str(inspection_id),
         "build_id": build_id,
@@ -599,6 +617,19 @@ async def handle_request_revision(
         json.dumps(do_not_change) if do_not_change else None,
         "PENDING"
     )
+    # Send Telegram notification
+    build_info = await db.fetchrow(
+        "SELECT project_id FROM ralph_builds WHERE build_id = $1",
+        build_id
+    )
+    telegram = get_telegram_service()
+    await telegram.send_revision_notification(
+        build_id=build_id,
+        project_id=build_info['project_id'] if build_info else "",
+        feedback_summary=feedback_summary,
+        priority_fixes=priority_fixes or []
+    )
+
 
     return {
         "status": "revision_requested",

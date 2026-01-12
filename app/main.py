@@ -19,7 +19,7 @@ import subprocess
 import sys
 
 from app.config import get_settings
-from app.api import projects, builds
+from app.api import projects, builds, telegram_webhook
 from app.mcp import server as mcp_server
 from app.services.scheduler import RalphScheduler
 
@@ -220,6 +220,7 @@ async def root():
 app.include_router(projects.router)
 app.include_router(builds.router)
 app.include_router(mcp_server.router)
+app.include_router(telegram_webhook.router)
 
 
 # --- Database Dependency Override ---
@@ -243,6 +244,7 @@ async def get_db_connection():
 app.dependency_overrides[projects.get_db] = get_db_connection
 app.dependency_overrides[builds.get_db] = get_db_connection
 app.dependency_overrides[mcp_server.get_db] = get_db_connection
+app.dependency_overrides[telegram_webhook.get_db] = get_db_connection
 
 
 # --- Development Server ---

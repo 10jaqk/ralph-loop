@@ -18,6 +18,7 @@ import hashlib
 import json
 
 from app.config import get_settings
+from app.services.telegram_service import get_telegram_service
 
 router = APIRouter(prefix="/builds", tags=["builds"])
 
@@ -238,6 +239,27 @@ async def ingest_build(
         requires_approval,
         approval_reason
     )
+
+    # Send Telegram notification if requires approval
+    if requires_approval:
+        telegram = get_telegram_service()
+        await telegram.send_approval_request(
+            build_id=build_id,
+            project_id=artifact.project_id,
+            reason=approval_reason,
+            changed_files=artifact.changed_files or [],
+            test_passed=(artifact.test_exit_code == 0) if artifact.test_exit_code is not None else True,
+            lint_passed=(artifact.lint_exit_code == 0) if artifact.lint_exit_code is not None else True
+        )
+    else:
+        # Send status update for non-approval builds
+        telegram = get_telegram_service()
+        await telegram.send_status_update(
+            build_id=build_id,
+            project_id=artifact.project_id,
+            status="submitted",
+            message=f"📤 *New build submitted*\n\nTests: {'✅' if artifact.test_exit_code == 0 else '❌'}\nLint: {'✅' if artifact.lint_exit_code == 0 else '❌'}\n\n🔍 ChatGPT will inspect soon..."
+        )
 
     return BuildIngestResponse(
         status="ingested",
