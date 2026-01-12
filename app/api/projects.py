@@ -141,9 +141,55 @@ async def create_project(
             "pii_fields": ["email", "phone", "ssn"]
         }
     """
-    # TODO: Implement with actual DB connection
-    # For now, return mock response
-    raise HTTPException(status_code=501, detail="Implementation pending - DB connection setup needed")
+    # Check if project_id already exists
+    existing = await db.fetchrow(
+        "SELECT project_id FROM project_registry WHERE project_id = $1",
+        project.project_id
+    )
+
+    if existing:
+        raise HTTPException(status_code=409, detail=f"Project '{project.project_id}' already exists")
+
+    # Insert new project
+    row = await db.fetchrow("""
+        INSERT INTO project_registry (
+            project_id, name, repo_url, default_branch, secrets_provider,
+            db_connection_ref, db_context_mode, allowed_schemas, allowed_tables,
+            pii_fields, created_by
+        ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+        )
+        RETURNING *
+    """,
+        project.project_id,
+        project.name,
+        project.repo_url,
+        project.default_branch,
+        project.secrets_provider.value,
+        project.db_connection_ref,
+        project.db_context_mode.value,
+        project.allowed_schemas,
+        project.allowed_tables,
+        project.pii_fields,
+        "admin-api"  # created_by
+    )
+
+    return ProjectResponse(
+        id=str(row['id']),
+        project_id=row['project_id'],
+        name=row['name'],
+        repo_url=row['repo_url'],
+        default_branch=row['default_branch'],
+        secrets_provider=SecretsProvider(row['secrets_provider']),
+        db_connection_ref=row['db_connection_ref'],
+        db_context_mode=DBContextMode(row['db_context_mode']),
+        allowed_schemas=row['allowed_schemas'],
+        allowed_tables=row['allowed_tables'],
+        pii_fields=row['pii_fields'],
+        created_by=row['created_by'],
+        created_at=row['created_at'],
+        updated_at=row['updated_at']
+    )
 
 
 @router.get("/", response_model=List[ProjectResponse])
@@ -156,8 +202,27 @@ async def list_projects(
 
     Requires admin authentication.
     """
-    # TODO: Implement with actual DB connection
-    raise HTTPException(status_code=501, detail="Implementation pending - DB connection setup needed")
+    rows = await db.fetch("SELECT * FROM project_registry ORDER BY created_at DESC")
+
+    return [
+        ProjectResponse(
+            id=str(row['id']),
+            project_id=row['project_id'],
+            name=row['name'],
+            repo_url=row['repo_url'],
+            default_branch=row['default_branch'],
+            secrets_provider=SecretsProvider(row['secrets_provider']),
+            db_connection_ref=row['db_connection_ref'],
+            db_context_mode=DBContextMode(row['db_context_mode']),
+            allowed_schemas=row['allowed_schemas'],
+            allowed_tables=row['allowed_tables'],
+            pii_fields=row['pii_fields'],
+            created_by=row['created_by'],
+            created_at=row['created_at'],
+            updated_at=row['updated_at']
+        )
+        for row in rows
+    ]
 
 
 @router.get("/{project_id}", response_model=ProjectResponse)
@@ -171,8 +236,30 @@ async def get_project(
 
     Requires admin authentication.
     """
-    # TODO: Implement with actual DB connection
-    raise HTTPException(status_code=501, detail="Implementation pending - DB connection setup needed")
+    row = await db.fetchrow(
+        "SELECT * FROM project_registry WHERE project_id = $1",
+        project_id
+    )
+
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found")
+
+    return ProjectResponse(
+        id=str(row['id']),
+        project_id=row['project_id'],
+        name=row['name'],
+        repo_url=row['repo_url'],
+        default_branch=row['default_branch'],
+        secrets_provider=SecretsProvider(row['secrets_provider']),
+        db_connection_ref=row['db_connection_ref'],
+        db_context_mode=DBContextMode(row['db_context_mode']),
+        allowed_schemas=row['allowed_schemas'],
+        allowed_tables=row['allowed_tables'],
+        pii_fields=row['pii_fields'],
+        created_by=row['created_by'],
+        created_at=row['created_at'],
+        updated_at=row['updated_at']
+    )
 
 
 @router.put("/{project_id}", response_model=ProjectResponse)
