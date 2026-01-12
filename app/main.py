@@ -191,9 +191,10 @@ async def health_check():
     return {
         "status": "healthy",
         "service": "ralph-loop",
-        "version": "1.0.1-migrations",
+        "version": "1.0.2-telegram",
         "env": settings.ENV,
-        "migrations": "auto-run-on-startup"
+        "migrations": "auto-run-on-startup",
+        "telegram_enabled": bool(settings.TELEGRAM_BOT_TOKEN and settings.TELEGRAM_CHAT_ID)
     }
 
 
