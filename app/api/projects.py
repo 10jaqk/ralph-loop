@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Header
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
 import uuid
+import json
 from datetime import datetime
 
 from app.config import get_settings
@@ -150,14 +151,14 @@ async def create_project(
     if existing:
         raise HTTPException(status_code=409, detail=f"Project '{project.project_id}' already exists")
 
-    # Insert new project
+    # Insert new project (JSONB fields need JSON serialization)
     row = await db.fetchrow("""
         INSERT INTO project_registry (
             project_id, name, repo_url, default_branch, secrets_provider,
             db_connection_ref, db_context_mode, allowed_schemas, allowed_tables,
             pii_fields, created_by
         ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+            $1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb, $11
         )
         RETURNING *
     """,
@@ -168,9 +169,9 @@ async def create_project(
         project.secrets_provider.value,
         project.db_connection_ref,
         project.db_context_mode.value,
-        project.allowed_schemas,
-        project.allowed_tables,
-        project.pii_fields,
+        json.dumps(project.allowed_schemas) if project.allowed_schemas else None,
+        json.dumps(project.allowed_tables) if project.allowed_tables else None,
+        json.dumps(project.pii_fields) if project.pii_fields else None,
         "admin-api"  # created_by
     )
 
