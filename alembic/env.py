@@ -2,8 +2,7 @@
 
 from logging.config import fileConfig
 import os
-from sqlalchemy import engine_from_config
-from sqlalchemy import pool
+from sqlalchemy import engine_from_config, pool, MetaData
 from alembic import context
 
 # Import all models for autogenerate
@@ -11,10 +10,13 @@ from app.models.project import Base as ProjectBase
 from app.models.build import Base as BuildBase
 from app.models.review import Base as ReviewBase
 
-# Combine all bases
-target_metadata = ProjectBase.metadata
-target_metadata.tables.update(BuildBase.metadata.tables)
-target_metadata.tables.update(ReviewBase.metadata.tables)
+# Combine all bases (SQLAlchemy 2.0 compatible way)
+target_metadata = MetaData()
+
+# Copy tables from each Base's metadata into the combined metadata
+for base in [ProjectBase, BuildBase, ReviewBase]:
+    for table in base.metadata.tables.values():
+        table.to_metadata(target_metadata)
 
 # this is the Alembic Config object
 config = context.config
