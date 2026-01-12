@@ -239,9 +239,9 @@ async def get_db_connection():
         yield conn
 
 
-# Override the get_db dependency in routers
-projects.get_db = get_db_connection
-builds.get_db = get_db_connection
+# Override the get_db dependency using FastAPI's dependency_overrides
+app.dependency_overrides[projects.get_db] = get_db_connection
+app.dependency_overrides[builds.get_db] = get_db_connection
 
 
 # --- Development Server ---
