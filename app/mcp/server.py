@@ -531,7 +531,6 @@ async def handle_submit_inspection(
         WHERE id = $2
     """, new_status, build_pk)
 
-    return {
     # Send Telegram notification
     telegram = get_telegram_service()
     if passed:
@@ -549,6 +548,7 @@ async def handle_submit_inspection(
             message=f"❌ *Inspection FAILED*\n\n{len(issues)} issue(s) found.\n\n🔧 Claude will address the feedback..."
         )
 
+    return {
         "status": "submitted",
         "inspection_id": str(inspection_id),
         "build_id": build_id,
