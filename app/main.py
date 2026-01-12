@@ -41,38 +41,61 @@ ralph_scheduler: RalphScheduler = None
 
 def run_migrations():
     """Run alembic migrations on startup."""
-    logger.info("=" * 50)
-    logger.info("Running database migrations...")
-    logger.info("=" * 50)
+    import os
+
+    logger.info("=" * 70)
+    logger.info("STARTING DATABASE MIGRATIONS")
+    logger.info("=" * 70)
+    logger.info(f"Current working directory: {os.getcwd()}")
+    logger.info(f"Python executable: {sys.executable}")
+    logger.info(f"Alembic config exists: {os.path.exists('alembic.ini')}")
+    logger.info("=" * 70)
 
     try:
+        # Use shell=False and explicit path to alembic command
         result = subprocess.run(
-            [sys.executable, "-m", "alembic", "upgrade", "head"],
+            ["alembic", "upgrade", "head"],
             capture_output=True,
             text=True,
-            check=True
+            check=True,
+            cwd=os.getcwd()
         )
 
-        logger.info("Migration output:")
+        logger.info("MIGRATION OUTPUT:")
         for line in result.stdout.splitlines():
             logger.info(f"  {line}")
+        if result.stderr:
+            logger.warning("MIGRATION WARNINGS:")
+            for line in result.stderr.splitlines():
+                logger.warning(f"  {line}")
 
-        logger.info("=" * 50)
-        logger.info("Migrations completed successfully!")
-        logger.info("=" * 50)
+        logger.info("=" * 70)
+        logger.info("✅ MIGRATIONS COMPLETED SUCCESSFULLY!")
+        logger.info("=" * 70)
 
     except subprocess.CalledProcessError as e:
-        logger.error("=" * 50)
-        logger.error("Migration failed!")
+        logger.error("=" * 70)
+        logger.error("❌ MIGRATION FAILED!")
         logger.error(f"Exit code: {e.returncode}")
+        logger.error(f"Command: {e.cmd}")
+        logger.error("=" * 70)
         logger.error("STDOUT:")
-        for line in e.stdout.splitlines():
+        for line in (e.stdout or "").splitlines():
             logger.error(f"  {line}")
+        logger.error("=" * 70)
         logger.error("STDERR:")
-        for line in e.stderr.splitlines():
+        for line in (e.stderr or "").splitlines():
             logger.error(f"  {line}")
-        logger.error("=" * 50)
-        raise RuntimeError(f"Database migration failed: {e.stderr}")
+        logger.error("=" * 70)
+        # CRITICAL: Raise exception to prevent app from starting with no tables
+        raise RuntimeError(f"Database migration failed with exit code {e.returncode}: {e.stderr}")
+    except FileNotFoundError as e:
+        logger.error("=" * 70)
+        logger.error("❌ ALEMBIC COMMAND NOT FOUND!")
+        logger.error(f"Error: {e}")
+        logger.error("This means alembic is not in PATH or not installed")
+        logger.error("=" * 70)
+        raise RuntimeError("Alembic command not found - check installation")
 
 
 async def init_db_pool():
@@ -168,8 +191,9 @@ async def health_check():
     return {
         "status": "healthy",
         "service": "ralph-loop",
-        "version": "1.0.0",
-        "env": settings.ENV
+        "version": "1.0.1-migrations",
+        "env": settings.ENV,
+        "migrations": "auto-run-on-startup"
     }
 
 
