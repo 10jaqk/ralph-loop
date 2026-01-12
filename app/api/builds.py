@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from datetime import datetime
 import uuid
 import hashlib
+import json
 
 from app.config import get_settings
 
@@ -181,9 +182,6 @@ async def ingest_build(
             }
         }
     """
-    # TODO: Implement with actual DB connection
-    # For now, return mock response
-
     # Generate build_id
     timestamp = datetime.now().isoformat()
     short_sha = artifact.commit_sha[:7] if artifact.commit_sha else "unknown"
@@ -195,7 +193,52 @@ async def ingest_build(
         artifact.diff_unified
     )
 
-    # Mock response
+    # Insert build into database
+    build_uuid = uuid.uuid4()
+
+    await db.execute("""
+        INSERT INTO ralph_builds (
+            id, build_id, project_id, build_type, task_id, task_description,
+            plan_build_id, commit_sha, branch, changed_files, diff_unified,
+            diff_source, review_bundle, test_command, test_exit_code,
+            test_output_tail, coverage, lint_command, lint_exit_code,
+            lint_output_tail, builder_signal, builder_notes,
+            inspection_status, iteration_count, requires_human_approval,
+            approval_reason
+        ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12, $13::jsonb,
+            $14, $15, $16, $17::jsonb, $18, $19, $20, $21, $22::jsonb, $23, $24,
+            $25, $26
+        )
+    """,
+        build_uuid,
+        build_id,
+        artifact.project_id,
+        artifact.build_type,
+        artifact.task_id,
+        artifact.task_description,
+        artifact.plan_build_id,
+        artifact.commit_sha,
+        artifact.branch,
+        json.dumps(artifact.changed_files) if artifact.changed_files else None,
+        artifact.diff_unified,
+        artifact.diff_source,
+        json.dumps(artifact.review_bundle) if artifact.review_bundle else None,
+        artifact.test_command,
+        artifact.test_exit_code,
+        artifact.test_output_tail,
+        json.dumps(artifact.coverage) if artifact.coverage else None,
+        artifact.lint_command,
+        artifact.lint_exit_code,
+        artifact.lint_output_tail,
+        artifact.builder_signal,
+        json.dumps(artifact.builder_notes) if artifact.builder_notes else None,
+        "PENDING",  # inspection_status
+        1,  # iteration_count
+        requires_approval,
+        approval_reason
+    )
+
     return BuildIngestResponse(
         status="ingested",
         build_id=build_id,
@@ -240,8 +283,46 @@ async def get_build(
 
     Returns full build artifact with inspection status.
     """
-    # TODO: Implement with actual DB connection
-    raise HTTPException(status_code=501, detail="Implementation pending - DB connection setup needed")
+    row = await db.fetchrow(
+        "SELECT * FROM ralph_builds WHERE build_id = $1",
+        build_id
+    )
+
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Build '{build_id}' not found")
+
+    return {
+        "id": str(row['id']),
+        "build_id": row['build_id'],
+        "project_id": row['project_id'],
+        "build_type": row['build_type'],
+        "task_id": row['task_id'],
+        "task_description": row['task_description'],
+        "plan_build_id": row['plan_build_id'],
+        "commit_sha": row['commit_sha'],
+        "branch": row['branch'],
+        "changed_files": json.loads(row['changed_files']) if row['changed_files'] else None,
+        "diff_unified": row['diff_unified'],
+        "diff_source": row['diff_source'],
+        "review_bundle": json.loads(row['review_bundle']) if row['review_bundle'] else None,
+        "test_command": row['test_command'],
+        "test_exit_code": row['test_exit_code'],
+        "test_output_tail": row['test_output_tail'],
+        "coverage": json.loads(row['coverage']) if row['coverage'] else None,
+        "lint_command": row['lint_command'],
+        "lint_exit_code": row['lint_exit_code'],
+        "lint_output_tail": row['lint_output_tail'],
+        "builder_signal": row['builder_signal'],
+        "builder_notes": json.loads(row['builder_notes']) if row['builder_notes'] else None,
+        "inspection_status": row['inspection_status'],
+        "iteration_count": row['iteration_count'],
+        "iteration_logs": json.loads(row['iteration_logs']) if row['iteration_logs'] else None,
+        "requires_human_approval": row['requires_human_approval'],
+        "approval_reason": row['approval_reason'],
+        "human_approved_by": row['human_approved_by'],
+        "created_at": row['created_at'].isoformat() if row['created_at'] else None,
+        "updated_at": row['updated_at'].isoformat() if row['updated_at'] else None
+    }
 
 
 @router.get("/{build_id}/inspection")
