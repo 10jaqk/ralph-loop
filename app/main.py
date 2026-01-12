@@ -15,6 +15,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import asyncpg
 import logging
+import subprocess
+import sys
 
 from app.config import get_settings
 from app.api import projects, builds
@@ -35,6 +37,42 @@ settings = get_settings()
 
 db_pool: asyncpg.Pool = None
 ralph_scheduler: RalphScheduler = None
+
+
+def run_migrations():
+    """Run alembic migrations on startup."""
+    logger.info("=" * 50)
+    logger.info("Running database migrations...")
+    logger.info("=" * 50)
+
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "alembic", "upgrade", "head"],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+
+        logger.info("Migration output:")
+        for line in result.stdout.splitlines():
+            logger.info(f"  {line}")
+
+        logger.info("=" * 50)
+        logger.info("Migrations completed successfully!")
+        logger.info("=" * 50)
+
+    except subprocess.CalledProcessError as e:
+        logger.error("=" * 50)
+        logger.error("Migration failed!")
+        logger.error(f"Exit code: {e.returncode}")
+        logger.error("STDOUT:")
+        for line in e.stdout.splitlines():
+            logger.error(f"  {line}")
+        logger.error("STDERR:")
+        for line in e.stderr.splitlines():
+            logger.error(f"  {line}")
+        logger.error("=" * 50)
+        raise RuntimeError(f"Database migration failed: {e.stderr}")
 
 
 async def init_db_pool():
@@ -79,6 +117,10 @@ async def lifespan(app: FastAPI):
 
     # Startup
     logger.info(f"Ralph Loop starting (ENV={settings.ENV})...")
+
+    # Run migrations BEFORE initializing connection pool
+    run_migrations()
+
     await init_db_pool()
 
     # Start scheduler
