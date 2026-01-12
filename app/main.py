@@ -242,6 +242,7 @@ async def get_db_connection():
 # Override the get_db dependency using FastAPI's dependency_overrides
 app.dependency_overrides[projects.get_db] = get_db_connection
 app.dependency_overrides[builds.get_db] = get_db_connection
+app.dependency_overrides[mcp_server.get_db] = get_db_connection
 
 
 # --- Development Server ---

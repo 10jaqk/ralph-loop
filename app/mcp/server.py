@@ -15,7 +15,7 @@ Tools:
 - get_pending_revisions: Get pending revision feedback (for builder)
 """
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Depends
 from fastapi.responses import StreamingResponse
 from typing import Dict, Any, Optional, List
 from pydantic import BaseModel, Field
@@ -24,6 +24,17 @@ import asyncio
 import asyncpg
 
 router = APIRouter(prefix="/mcp", tags=["mcp"])
+
+
+# --- Database Dependency ---
+
+async def get_db():
+    """
+    Get database connection.
+
+    Will be overridden by FastAPI app's dependency_overrides.
+    """
+    return None
 
 
 # --- MCP Tool Definitions ---
@@ -276,7 +287,7 @@ async def call_tool(request: Request):
 # --- Direct Tool Endpoints (Alternative to MCP) ---
 
 @router.post("/tools/{tool_name}")
-async def execute_tool_direct(tool_name: str, request: Request):
+async def execute_tool_direct(tool_name: str, request: Request, db=Depends(get_db)):
     """
     Direct tool execution endpoint (alternative to MCP protocol).
 
@@ -289,42 +300,154 @@ async def execute_tool_direct(tool_name: str, request: Request):
     body = await request.json()
     arguments = body.get("arguments", {})
 
-    # TODO: Implement actual tool handlers with DB access
-    result = {"status": "not_implemented", "tool": tool_name, "arguments": arguments}
+    # Route to appropriate handler
+    if tool_name == "get_latest_ready_build":
+        result = await handle_get_latest_ready_build(db, arguments.get("project_id"))
+    elif tool_name == "get_build":
+        result = await handle_get_build(db, arguments.get("build_id"))
+    elif tool_name == "submit_inspection":
+        result = await handle_submit_inspection(
+            db,
+            arguments.get("build_id"),
+            arguments.get("passed"),
+            arguments.get("issues", []),
+            arguments.get("suggestions"),
+            arguments.get("confidence")
+        )
+    elif tool_name == "request_revision":
+        result = await handle_request_revision(
+            db,
+            arguments.get("build_id"),
+            arguments.get("feedback_summary"),
+            arguments.get("priority_fixes", []),
+            arguments.get("patch_guidance"),
+            arguments.get("do_not_change")
+        )
+    elif tool_name == "approve_build":
+        result = await handle_approve_build(
+            db,
+            arguments.get("build_id"),
+            arguments.get("notes"),
+            arguments.get("human_approved_by")
+        )
+    elif tool_name == "get_pending_revisions":
+        result = await handle_get_pending_revisions(
+            db,
+            arguments.get("project_id"),
+            arguments.get("build_id")
+        )
+    else:
+        result = {"error": f"Unknown tool: {tool_name}"}
 
     return {"result": result}
 
 
 # --- Tool Handlers (Placeholder - TODO: Implement) ---
 
-async def handle_get_latest_ready_build(db: asyncpg.Pool, project_id: str) -> Optional[Dict]:
+async def handle_get_latest_ready_build(db, project_id: str) -> Optional[Dict]:
     """
     Get newest build with READY_FOR_REVIEW signal and PENDING inspection.
 
     Args:
-        db: Database connection pool
+        db: Database connection
         project_id: Project identifier
 
     Returns:
         Build dict or None if no builds ready
     """
-    # TODO: Implement
-    return None
+    row = await db.fetchrow("""
+        SELECT * FROM ralph_builds
+        WHERE project_id = $1
+          AND builder_signal = 'READY_FOR_REVIEW'
+          AND inspection_status = 'PENDING'
+        ORDER BY created_at DESC
+        LIMIT 1
+    """, project_id)
+
+    if not row:
+        return None
+
+    return {
+        "id": str(row['id']),
+        "build_id": row['build_id'],
+        "project_id": row['project_id'],
+        "build_type": row['build_type'],
+        "task_id": row['task_id'],
+        "task_description": row['task_description'],
+        "plan_build_id": row['plan_build_id'],
+        "commit_sha": row['commit_sha'],
+        "branch": row['branch'],
+        "changed_files": json.loads(row['changed_files']) if row['changed_files'] else None,
+        "diff_unified": row['diff_unified'],
+        "diff_source": row['diff_source'],
+        "review_bundle": json.loads(row['review_bundle']) if row['review_bundle'] else None,
+        "test_command": row['test_command'],
+        "test_exit_code": row['test_exit_code'],
+        "test_output_tail": row['test_output_tail'],
+        "coverage": json.loads(row['coverage']) if row['coverage'] else None,
+        "lint_command": row['lint_command'],
+        "lint_exit_code": row['lint_exit_code'],
+        "lint_output_tail": row['lint_output_tail'],
+        "builder_signal": row['builder_signal'],
+        "builder_notes": json.loads(row['builder_notes']) if row['builder_notes'] else None,
+        "inspection_status": row['inspection_status'],
+        "iteration_count": row['iteration_count'],
+        "requires_human_approval": row['requires_human_approval'],
+        "approval_reason": row['approval_reason'],
+        "created_at": row['created_at'].isoformat() if row['created_at'] else None,
+        "updated_at": row['updated_at'].isoformat() if row['updated_at'] else None
+    }
 
 
-async def handle_get_build(db: asyncpg.Pool, build_id: str) -> Optional[Dict]:
+async def handle_get_build(db, build_id: str) -> Optional[Dict]:
     """
     Get full build artifact by ID.
 
     Args:
-        db: Database connection pool
+        db: Database connection
         build_id: Build identifier
 
     Returns:
         Full build artifact dict
     """
-    # TODO: Implement
-    return None
+    row = await db.fetchrow(
+        "SELECT * FROM ralph_builds WHERE build_id = $1",
+        build_id
+    )
+
+    if not row:
+        return None
+
+    return {
+        "id": str(row['id']),
+        "build_id": row['build_id'],
+        "project_id": row['project_id'],
+        "build_type": row['build_type'],
+        "task_id": row['task_id'],
+        "task_description": row['task_description'],
+        "plan_build_id": row['plan_build_id'],
+        "commit_sha": row['commit_sha'],
+        "branch": row['branch'],
+        "changed_files": json.loads(row['changed_files']) if row['changed_files'] else None,
+        "diff_unified": row['diff_unified'],
+        "diff_source": row['diff_source'],
+        "review_bundle": json.loads(row['review_bundle']) if row['review_bundle'] else None,
+        "test_command": row['test_command'],
+        "test_exit_code": row['test_exit_code'],
+        "test_output_tail": row['test_output_tail'],
+        "coverage": json.loads(row['coverage']) if row['coverage'] else None,
+        "lint_command": row['lint_command'],
+        "lint_exit_code": row['lint_exit_code'],
+        "lint_output_tail": row['lint_output_tail'],
+        "builder_signal": row['builder_signal'],
+        "builder_notes": json.loads(row['builder_notes']) if row['builder_notes'] else None,
+        "inspection_status": row['inspection_status'],
+        "iteration_count": row['iteration_count'],
+        "requires_human_approval": row['requires_human_approval'],
+        "approval_reason": row['approval_reason'],
+        "created_at": row['created_at'].isoformat() if row['created_at'] else None,
+        "updated_at": row['updated_at'].isoformat() if row['updated_at'] else None
+    }
 
 
 async def handle_submit_inspection(
