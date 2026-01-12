@@ -451,7 +451,7 @@ async def handle_get_build(db, build_id: str) -> Optional[Dict]:
 
 
 async def handle_submit_inspection(
-    db: asyncpg.Pool,
+    db,
     build_id: str,
     passed: bool,
     issues: List[Dict],
@@ -462,7 +462,7 @@ async def handle_submit_inspection(
     Submit inspection verdict (idempotent).
 
     Args:
-        db: Database connection pool
+        db: Database connection
         build_id: Build identifier
         passed: Whether build passed inspection
         issues: List of issues found
@@ -472,14 +472,76 @@ async def handle_submit_inspection(
     Returns:
         Inspection result with status
     """
-    # TODO: Implement idempotent inspection submission
-    # Check for existing inspection, return if exists
-    # Otherwise create new inspection and update build status
-    return {"status": "not_implemented"}
+    # Get build to get build_pk (UUID)
+    build = await db.fetchrow(
+        "SELECT id, project_id FROM ralph_builds WHERE build_id = $1",
+        build_id
+    )
+
+    if not build:
+        return {"error": f"Build '{build_id}' not found"}
+
+    build_pk = build['id']
+    inspector_model = "gpt-5.2"  # Default inspector model
+
+    # Check for existing inspection (idempotent)
+    existing = await db.fetchrow("""
+        SELECT * FROM ralph_inspections
+        WHERE build_pk = $1 AND inspector_model = $2
+    """, build_pk, inspector_model)
+
+    if existing:
+        return {
+            "status": "already_submitted",
+            "inspection_id": str(existing['id']),
+            "build_id": build_id,
+            "passed": existing['passed'],
+            "message": "Inspection already exists for this build and inspector model"
+        }
+
+    # Insert new inspection
+    import uuid
+    inspection_id = uuid.uuid4()
+
+    await db.execute("""
+        INSERT INTO ralph_inspections (
+            id, build_pk, build_id, inspector_model, passed, issues,
+            suggestions, confidence, raw_response
+        ) VALUES (
+            $1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9
+        )
+    """,
+        inspection_id,
+        build_pk,
+        build_id,
+        inspector_model,
+        passed,
+        json.dumps(issues) if issues else None,
+        suggestions,
+        confidence,
+        None  # raw_response - could be populated if needed
+    )
+
+    # Update build inspection_status
+    new_status = "PASSED" if passed else "FAILED"
+    await db.execute("""
+        UPDATE ralph_builds
+        SET inspection_status = $1, updated_at = NOW()
+        WHERE id = $2
+    """, new_status, build_pk)
+
+    return {
+        "status": "submitted",
+        "inspection_id": str(inspection_id),
+        "build_id": build_id,
+        "passed": passed,
+        "issues_count": len(issues) if issues else 0,
+        "inspection_status": new_status
+    }
 
 
 async def handle_request_revision(
-    db: asyncpg.Pool,
+    db,
     build_id: str,
     feedback_summary: str,
     priority_fixes: List[str],
@@ -490,7 +552,7 @@ async def handle_request_revision(
     Request builder revision with structured feedback.
 
     Args:
-        db: Database connection pool
+        db: Database connection
         build_id: Build identifier
         feedback_summary: Summary of issues
         priority_fixes: List of priority fixes needed
@@ -500,12 +562,55 @@ async def handle_request_revision(
     Returns:
         Revision request confirmation
     """
-    # TODO: Implement revision request creation
-    return {"status": "not_implemented"}
+    # Get build to get build_pk (UUID)
+    build = await db.fetchrow(
+        "SELECT id FROM ralph_builds WHERE build_id = $1",
+        build_id
+    )
+
+    if not build:
+        return {"error": f"Build '{build_id}' not found"}
+
+    build_pk = build['id']
+
+    # Generate revision_id
+    import uuid
+    from datetime import datetime
+    revision_uuid = uuid.uuid4()
+    timestamp = datetime.now().isoformat()
+    revision_id = f"rev-{timestamp}-{str(revision_uuid)[:8]}"
+
+    # Insert revision request
+    await db.execute("""
+        INSERT INTO ralph_revisions (
+            id, build_pk, build_id, revision_id, feedback_summary,
+            priority_fixes, patch_guidance, do_not_change, status
+        ) VALUES (
+            $1, $2, $3, $4, $5, $6::jsonb, $7, $8::jsonb, $9
+        )
+    """,
+        revision_uuid,
+        build_pk,
+        build_id,
+        revision_id,
+        feedback_summary,
+        json.dumps(priority_fixes) if priority_fixes else None,
+        patch_guidance,
+        json.dumps(do_not_change) if do_not_change else None,
+        "PENDING"
+    )
+
+    return {
+        "status": "revision_requested",
+        "revision_id": revision_id,
+        "build_id": build_id,
+        "priority_fixes_count": len(priority_fixes) if priority_fixes else 0,
+        "message": "Builder can fetch this revision feedback via get_pending_revisions"
+    }
 
 
 async def handle_approve_build(
-    db: asyncpg.Pool,
+    db,
     build_id: str,
     notes: Optional[str],
     human_approved_by: Optional[str]
@@ -519,7 +624,7 @@ async def handle_approve_build(
     - Human approval if required
 
     Args:
-        db: Database connection pool
+        db: Database connection
         build_id: Build identifier
         notes: Approval notes
         human_approved_by: Human approver (if required)
@@ -527,12 +632,65 @@ async def handle_approve_build(
     Returns:
         Approval confirmation
     """
-    # TODO: Implement approval logic with guardrail checks
-    return {"status": "not_implemented"}
+    # Get build
+    build = await db.fetchrow(
+        "SELECT * FROM ralph_builds WHERE build_id = $1",
+        build_id
+    )
+
+    if not build:
+        return {"error": f"Build '{build_id}' not found"}
+
+    # Must have passed inspection
+    if build['inspection_status'] != "PASSED":
+        return {
+            "error": "Cannot approve build without passing inspection",
+            "inspection_status": build['inspection_status']
+        }
+
+    # Must have human approval if required
+    if build['requires_human_approval']:
+        if not human_approved_by:
+            return {
+                "error": "Build requires human approval",
+                "reason": build['approval_reason'],
+                "message": "Provide human_approved_by parameter"
+            }
+
+        # Update with human approver
+        await db.execute("""
+            UPDATE ralph_builds
+            SET human_approved_by = $1, updated_at = NOW()
+            WHERE id = $2
+        """, human_approved_by, build['id'])
+
+    # Check iteration limit (max 3)
+    if build['iteration_count'] >= 3:
+        return {
+            "error": "Max iteration limit (3) reached",
+            "message": "Manual review required before deployment"
+        }
+
+    # Update build to DEPLOYED status
+    await db.execute("""
+        UPDATE ralph_builds
+        SET builder_signal = 'DEPLOYED', updated_at = NOW()
+        WHERE id = $1
+    """, build['id'])
+
+    return {
+        "status": "approved",
+        "build_id": build_id,
+        "commit_sha": build['commit_sha'],
+        "branch": build['branch'],
+        "requires_human_approval": build['requires_human_approval'],
+        "human_approved_by": human_approved_by if build['requires_human_approval'] else None,
+        "message": "Build approved for deployment"
+    }
 
 
 async def handle_get_pending_revisions(
-    db: asyncpg.Pool,
+    db,
     project_id: str,
     build_id: Optional[str]
 ) -> List[Dict]:
@@ -542,12 +700,46 @@ async def handle_get_pending_revisions(
     CRITICAL: This enables the FAIL → revise → resubmit loop.
 
     Args:
-        db: Database connection pool
+        db: Database connection
         project_id: Project identifier
         build_id: Optional specific build ID
 
     Returns:
         List of pending revision requests
     """
-    # TODO: Implement pending revisions query
-    return []
+    # Build query based on filters
+    if build_id:
+        # Specific build
+        rows = await db.fetch("""
+            SELECT r.*, b.project_id, b.build_type, b.task_id
+            FROM ralph_revisions r
+            JOIN ralph_builds b ON r.build_pk = b.id
+            WHERE r.build_id = $1 AND r.status = 'PENDING'
+            ORDER BY r.created_at DESC
+        """, build_id)
+    else:
+        # All pending revisions for project
+        rows = await db.fetch("""
+            SELECT r.*, b.project_id, b.build_type, b.task_id
+            FROM ralph_revisions r
+            JOIN ralph_builds b ON r.build_pk = b.id
+            WHERE b.project_id = $1 AND r.status = 'PENDING'
+            ORDER BY r.created_at DESC
+        """, project_id)
+
+    return [
+        {
+            "revision_id": row['revision_id'],
+            "build_id": row['build_id'],
+            "project_id": row['project_id'],
+            "build_type": row['build_type'],
+            "task_id": row['task_id'],
+            "feedback_summary": row['feedback_summary'],
+            "priority_fixes": json.loads(row['priority_fixes']) if row['priority_fixes'] else [],
+            "patch_guidance": row['patch_guidance'],
+            "do_not_change": json.loads(row['do_not_change']) if row['do_not_change'] else [],
+            "status": row['status'],
+            "created_at": row['created_at'].isoformat() if row['created_at'] else None
+        }
+        for row in rows
+    ]
