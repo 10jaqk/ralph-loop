@@ -66,4 +66,12 @@ class Settings(BaseSettings):
         case_sensitive = True
 
 
-settings = Settings()
+_settings = None
+
+
+def get_settings() -> Settings:
+    """Get settings instance (singleton)."""
+    global _settings
+    if _settings is None:
+        _settings = Settings()
+    return _settings
