@@ -16,9 +16,12 @@ from datetime import datetime
 import uuid
 import hashlib
 import json
+import logging
 
 from app.config import get_settings
 from app.services.telegram_service import get_telegram_service
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/builds", tags=["builds"])
 
