@@ -240,6 +240,29 @@ async def ingest_build(
         approval_reason
     )
 
+    # Auto-enqueue for review if READY_FOR_REVIEW
+    review_queued = False
+    if artifact.builder_signal == "READY_FOR_REVIEW":
+        # Deduplication: delete old pending reviews for same (project, task, queue_type)
+        if artifact.task_id:
+            await db.execute("""
+                DELETE FROM ralph_review_queue
+                WHERE project_id = $1
+                  AND task_id = $2
+                  AND queue_type = $3
+                  AND status = 'PENDING'
+            """, artifact.project_id, artifact.task_id, artifact.build_type)
+
+        # Insert new review request
+        await db.execute("""
+            INSERT INTO ralph_review_queue
+                (build_pk, build_id, project_id, task_id, queue_type, priority, status)
+            VALUES ($1, $2, $3, $4, $5, 5, 'PENDING')
+        """, build_uuid, build_id, artifact.project_id, artifact.task_id, artifact.build_type)
+
+        review_queued = True
+        logger.info(f"Auto-enqueued {artifact.build_type} review for build {build_id}")
+
     # Send Telegram notification if requires approval
     if requires_approval:
         telegram = get_telegram_service()
@@ -265,7 +288,7 @@ async def ingest_build(
         status="ingested",
         build_id=build_id,
         inspection_status="PENDING",
-        review_queued=(artifact.builder_signal == "READY_FOR_REVIEW"),
+        review_queued=review_queued,
         requires_human_approval=requires_approval,
         approval_reason=approval_reason
     )
